@@ -50,10 +50,11 @@ func main() {
 	}
 
 	tasks := make(chan task, *workers)
-	var wg sync.WaitGroup
+	var workWG sync.WaitGroup // tracks outstanding tasks
+	var workerWG sync.WaitGroup
 
 	worker := func() {
-		defer wg.Done()
+		defer workerWG.Done()
 		for t := range tasks {
 			if t.depth < 0 {
 				continue
@@ -74,20 +75,28 @@ func main() {
 			}
 			if t.depth > 0 {
 				for _, l := range links {
+					workWG.Add(1)
 					tasks <- task{l, t.depth - 1}
 				}
 			}
+			workWG.Done()
 		}
 	}
 
 	for i := 0; i < *workers; i++ {
-		wg.Add(1)
+		workerWG.Add(1)
 		go worker()
 	}
 
+	workWG.Add(1)
 	tasks <- task{u.String(), *maxDepth}
-	close(tasks)
-	wg.Wait()
+
+	go func() {
+		workWG.Wait()
+		close(tasks)
+	}()
+
+	workerWG.Wait()
 
 	for _, issue := range results {
 		fmt.Printf("[+] %s - %s\n", issue.URL, issue.Message)
